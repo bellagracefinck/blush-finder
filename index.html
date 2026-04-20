@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blush Color Map</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #fcfcfc;
+        }
+        #header-container {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #status-message {
+            font-weight: bold;
+            color: #555;
+        }
+        #error-message {
+            color: #d9534f;
+            display: none;
+            margin-top: 10px;
+        }
+        #tester {
+            width: 100%;
+            height: 800px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="header-container">
+        <h2>Blush Color Map 🎨</h2>
+        <p id="status-message">Loading blush data from files...</p>
+        <p id="error-message">
+            <b>Error loading data.</b> If you are opening this file directly (file://), your browser is blocking access to the data folder. Please run a local web server (like VS Code Live Server) to view this page.
+        </p>
+    </div>
+
+    <div id="tester"></div>
+
+    <script>
+        // Function to convert HEX to HSL (Hue, Saturation, Lightness)
+        function hexToHSL(hex) {
+            hex = hex.replace(/^#/, '');
+            let r = parseInt(hex.substring(0, 2), 16) / 255;
+            let g = parseInt(hex.substring(2, 4), 16) / 255;
+            let b = parseInt(hex.substring(4, 6), 16) / 255;
+
+            let max = Math.max(r, g, b), min = Math.min(r, g, b);
+            let h, s, l = (max + min) / 2;
+
+            if (max == min) {
+                h = s = 0; 
+            } else {
+                let d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                switch (max) {
+                    case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+                    case g: h = (b - r) / d + 2; break;
+                    case b: h = (r - g) / d + 4; break;
+                }
+                h /= 6;
+            }
+            
+            h = Math.round(h * 360);
+            if (h > 180) h -= 360; 
+
+            return { h: h, s: s, l: l * 100 }; 
+        }
+
+        // Automatically fetch and load the CSV files when the page opens
+        window.addEventListener('DOMContentLoaded', () => {
+            
+            // Note the path goes up one level '../' to get out of the src folder
+            const filesToFetch = [
+                'data/ulta_blushes.csv',
+                'data/sephora_blushes.csv',
+            ];
+
+            // Fetch all files concurrently
+            Promise.all(filesToFetch.map(url => fetch(url).then(res => {
+                if (!res.ok) throw new Error(`Failed to load ${url}`);
+                return res.text();
+            })))
+            .then(csvTexts => {
+                let combinedData = [];
+
+                // Parse each fetched CSV text and combine them
+                csvTexts.forEach(csvText => {
+                    let parsed = Papa.parse(csvText, {
+                        header: true,
+                        skipEmptyLines: true
+                    });
+                    combinedData = combinedData.concat(parsed.data);
+                });
+
+                document.getElementById('status-message').innerText = `Successfully loaded ${combinedData.length} blush shades!`;
+                processData(combinedData);
+            })
+            .catch(error => {
+                console.error("Error fetching data:", error);
+                document.getElementById('status-message').style.display = 'none';
+                document.getElementById('error-message').style.display = 'block';
+            });
+        });
+
+        function processData(data) {
+            let hues = [];
+            let lightnesses = [];
+            let colors = [];
+            let hoverTexts = [];
+            let urls = [];
+
+            data.forEach(row => {
+                let hexCode = row['dominant color 1'];
+                let url = row['product url'];
+                let brand = row['brand'];
+                let name = row['name'];
+                let shade = row['shade'];
+
+                // Ensure we have a hex code to work with
+                if (hexCode && hexCode.startsWith('#')) {
+                    let hsl = hexToHSL(hexCode);
+                    
+                    hues.push(hsl.h); // Undertone (X axis)
+                    lightnesses.push(hsl.l); // Brightness (Y axis)
+                    colors.push(hexCode); // Dot color
+                    urls.push(url); // Stored for clicking
+                    
+                    hoverTexts.push(`<b>${brand}</b><br>${name}<br>Shade: ${shade}`);
+                }
+            });
+
+            createPlot(hues, lightnesses, colors, hoverTexts, urls);
+        }
+
+        function createPlot(hues, lightnesses, colors, hoverTexts, urls) {
+            var trace = {
+                x: hues,
+                y: lightnesses,
+                mode: 'markers',
+                type: 'scatter',
+                marker: {
+                    size: 14,
+                    color: colors,
+                    line: {
+                        color: 'rgba(0, 0, 0, 0.2)',
+                        width: 1
+                    }
+                },
+                text: hoverTexts,
+                customdata: urls, 
+                hoverinfo: 'text'
+            };
+
+            var layout = {
+                title: 'Blush Shade Directory',
+                hovermode: 'closest',
+                xaxis: {
+                    title: 'Undertone (Cooler / Purples ←   → Warmer / Oranges)',
+                    showgrid: false,
+                    zeroline: false
+                },
+                yaxis: {
+                    title: 'Brightness (Darker ←   → Lighter)',
+                    showgrid: true,
+                    zeroline: false
+                },
+                plot_bgcolor: '#f9f9f9',
+                paper_bgcolor: 'white'
+            };
+
+            var plotDiv = document.getElementById('tester');
+            Plotly.newPlot(plotDiv, [trace], layout);
+
+            plotDiv.on('plotly_click', function(data) {
+                var url = data.points[0].customdata;
+                if (url) {
+                    window.open(url, '_blank'); 
+                }
+            });
+        }
+    </script>
+</body>
+</html>
